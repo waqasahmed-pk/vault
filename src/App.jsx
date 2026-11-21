@@ -20,6 +20,7 @@ import {
   onAuthStateChanged,
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   doc,
   setDoc,
@@ -293,6 +294,18 @@ const WALogo = ({ theme, onClick }) => {
       </span>
     </button>
   );
+};
+
+const getLongPollingDb = (cfg) => {
+  const app = getApps().length ? getApps()[0] : initializeApp(cfg);
+  try {
+    return initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false,
+    });
+  } catch {
+    return getFirestore(app);
+  }
 };
 
 export default function App() {
@@ -656,7 +669,7 @@ export default function App() {
     try {
       setCloudStatus('connecting');
       const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-      const db = getFirestore(app);
+      const db = getLongPollingDb(firebaseConfig);
 
       const userDocRef = doc(db, 'users', cloudUser.uid, 'workspace', 'main');
       unsubUser = onSnapshot(
@@ -732,14 +745,17 @@ export default function App() {
         const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
         const auth = getAuth(app);
         if (!auth.currentUser) {
-          await signInAnonymously(auth);
+          await signInAnonymously(auth).catch((authErr) => {
+            console.warn('Anonymous auth skipped/failed:', authErr);
+          });
         }
         if (isCancelled) return;
-        const db = getFirestore(app);
+        const db = getLongPollingDb(firebaseConfig);
         const roomDocRef = doc(db, 'shared_rooms', roommateModeKey);
         unsubRoom = onSnapshot(
           roomDocRef,
           (snap) => {
+            if (isCancelled) return;
             if (snap.exists()) {
               const rData = snap.data();
               isApplyingRemoteRef.current = true;
@@ -759,15 +775,22 @@ export default function App() {
             }
           },
           (err) => {
+            if (isCancelled) return;
             console.error('Roommate listener error:', err);
-            showToast('Unable to read mess status. Check key or Firestore rules.', 'error');
-            setCloudStatus('offline');
+            showToast(
+              err?.code === 'permission-denied'
+                ? 'Firestore blocked read-only access for this room key.'
+                : 'Unable to read mess status. Check key or Firestore rules.',
+              'error'
+            );
+            setCloudStatus('error');
           }
         );
       } catch (err) {
+        if (isCancelled) return;
         console.error('Roommate connect error:', err);
         showToast(err?.message || 'Could not connect to mess room.', 'error');
-        setCloudStatus('offline');
+        setCloudStatus('error');
       }
     };
     connectRoommate();
@@ -782,7 +805,7 @@ export default function App() {
     const timer = setTimeout(async () => {
       try {
         const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getLongPollingDb(firebaseConfig);
         const cloudSafeEntries = entries.map((e) => ({
           ...e,
           attachments: (e.attachments || []).filter((a) => (a.dataUrl?.length || 0) < 750000),
@@ -835,7 +858,7 @@ export default function App() {
     const timer = setTimeout(async () => {
       try {
         const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getLongPollingDb(firebaseConfig);
         await setDoc(
           doc(db, 'shared_rooms', roomKey),
           {
@@ -870,7 +893,7 @@ export default function App() {
     if (firebaseConfig?.apiKey && isAdminAuthenticated) {
       try {
         const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getLongPollingDb(firebaseConfig);
         await setDoc(
           doc(db, 'users', cloudUser.uid, 'workspace', 'main'),
           { roomKey: newKey, updatedAt: new Date().toISOString() },
@@ -3667,6 +3690,8 @@ ${item.details}`
                           ? '● Live Status Synced'
                           : roomKeyNotFound
                           ? 'Key Not Found'
+                          : cloudStatus === 'error'
+                          ? 'Connection Error'
                           : 'Connecting...'}
                       </span>
                     )}

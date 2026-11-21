@@ -8,7 +8,7 @@ import {
   PiggyBank, Receipt, CheckSquare, ChevronLeft, ChevronRight,
   RotateCcw, Copy, ShieldCheck, ScrollText, Smartphone,
   Share2, ClipboardCheck, Star, Settings, Sun, Moon, RefreshCw,
-  Cloud, Key, LogIn, LogOut, Link2, UserPlus
+  Cloud, Key, LogIn, LogOut, Link2, UserPlus, Sparkles
 } from 'lucide-react';
 import { initializeApp, getApps } from 'firebase/app';
 import {
@@ -42,7 +42,10 @@ const DB_KEYS = {
   HOUSE_MEMBERS: 'dp_house_members_v3',
   HOUSE_EXPENSES: 'dp_house_expenses_v3',
   HOUSE_DEPOSITS: 'dp_house_deposits_v3',
+  HOUSE_CATEGORIES: 'dp_house_categories_v3',
+  HOUSE_RULES_TEXT: 'dp_house_rules_text_v3',
   TAB_ORDER: 'dp_tab_order_v3',
+  TAB_LABELS: 'dp_tab_labels_v3',
   HEADER_META: 'dp_header_meta_v3',
   THEME: 'dp_theme_v3',
   FIREBASE_CFG: 'dp_firebase_cfg_v4',
@@ -96,6 +99,19 @@ const DEFAULT_HEADER_META = {
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const MEAL_OPTIONS = ['Breakfast', 'Lunch', 'Dinner'];
+const DEFAULT_MESS_CATEGORIES = [
+  'Vegetables',
+  'Meat/Chicken',
+  'Oil/Ghee',
+  'Roti/Naan',
+  'Spices',
+  'Dairy',
+  'Gas',
+  'Custom',
+];
+
+const DEFAULT_HOUSE_RULES =
+  '• Meals divide strictly among present members toggled at entry.\n• Groceries divide equally across all housemates.';
 
 const NOTE_THEMES = {
   amber: {
@@ -210,6 +226,11 @@ const formatMoney = (num) => {
   return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
 
+const formatPKR = (num) => {
+  const val = Number(num) || 0;
+  return `Rs. ${val.toLocaleString('en-PK', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+};
+
 const generateRandomRoomKey = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let part1 = '';
@@ -320,6 +341,9 @@ export default function App() {
   const [tempHeaderSubtitle, setTempHeaderSubtitle] = useState('');
 
   const [tabOrder, setTabOrder] = useState(DEFAULT_TAB_ORDER);
+  const [customTabLabels, setCustomTabLabels] = useState({});
+  const [editingTabId, setEditingTabId] = useState(null);
+  const [tempTabLabel, setTempTabLabel] = useState('');
   const [draggedTabId, setDraggedTabId] = useState(null);
   const [activeTab, setActiveTab] = useState('house');
   const [selectedEntryId, setSelectedEntryId] = useState(null);
@@ -334,6 +358,11 @@ export default function App() {
   const [houseMembers, setHouseMembers] = useState([]);
   const [houseExpenses, setHouseExpenses] = useState([]);
   const [houseDeposits, setHouseDeposits] = useState([]);
+  const [messCategories, setMessCategories] = useState(DEFAULT_MESS_CATEGORIES);
+  const [newMessCategoryInput, setNewMessCategoryInput] = useState('');
+  const [houseRulesText, setHouseRulesText] = useState(DEFAULT_HOUSE_RULES);
+  const [isEditingHouseRules, setIsEditingHouseRules] = useState(false);
+  const [tempHouseRulesText, setTempHouseRulesText] = useState('');
 
   const [firebaseConfig, setFirebaseConfig] = useState(DEFAULT_FIREBASE_CONFIG);
   const [firebaseConfigText, setFirebaseConfigText] = useState('');
@@ -389,6 +418,10 @@ export default function App() {
   const [todoText, setTodoText] = useState('');
   const [todoPriority, setTodoPriority] = useState('Medium');
   const [todoDueDate, setTodoDueDate] = useState('');
+  const [editingTodoId, setEditingTodoId] = useState(null);
+  const [editTodoText, setEditTodoText] = useState('');
+  const [editTodoPriority, setEditTodoPriority] = useState('Medium');
+  const [editTodoDueDate, setEditTodoDueDate] = useState('');
   const [todoFilter, setTodoFilter] = useState('all');
 
   const [infoTitle, setInfoTitle] = useState('');
@@ -411,17 +444,28 @@ export default function App() {
   const [expSource, setExpSource] = useState('Cash');
   const [editingExpId, setEditingExpId] = useState(null);
 
+  // MessMate 8-Friends Mess state (fully editable)
   const [editingMemberId, setEditingMemberId] = useState(null);
   const [memberNameInput, setMemberNameInput] = useState('');
   const [memberBalanceInput, setMemberBalanceInput] = useState('');
   const [topUpMemberId, setTopUpMemberId] = useState(null);
   const [memberTopUpAmount, setMemberTopUpAmount] = useState('');
+  const [showBulkTopUp, setShowBulkTopUp] = useState(false);
+  const [bulkTopUpAmount, setBulkTopUpAmount] = useState('');
+  const [showDepositLedger, setShowDepositLedger] = useState(false);
+  const [editingDepositId, setEditingDepositId] = useState(null);
+  const [editDepositAmount, setEditDepositAmount] = useState('');
+  const [editDepositDate, setEditDepositDate] = useState('');
 
   const [houseExpDate, setHouseExpDate] = useState(getTodayStr());
   const [houseExpCategory, setHouseExpCategory] = useState('Meal');
   const [houseExpMeals, setHouseExpMeals] = useState(['Dinner']);
+  const [isMultiMealMode, setIsMultiMealMode] = useState(false);
   const [houseExpDetail, setHouseExpDetail] = useState('');
   const [houseExpAmount, setHouseExpAmount] = useState('');
+  const [houseExpItems, setHouseExpItems] = useState([
+    { id: 'hitem-init-1', name: '', amount: '', category: 'Vegetables', splitType: 'Meal' },
+  ]);
   const [presentMemberIds, setPresentMemberIds] = useState([]);
   const [editingHouseExpId, setEditingHouseExpId] = useState(null);
 
@@ -448,6 +492,7 @@ export default function App() {
       const savedTheme = await dbGet(DB_KEYS.THEME);
       const savedHeader = await dbGet(DB_KEYS.HEADER_META);
       const savedTabOrder = await dbGet(DB_KEYS.TAB_ORDER);
+      const savedTabLabels = await dbGet(DB_KEYS.TAB_LABELS);
       const savedLogs = await dbGet(DB_KEYS.LOGS);
       const savedNotes = await dbGet(DB_KEYS.NOTES);
       const savedRough = await dbGet(DB_KEYS.ROUGH_NOTES);
@@ -458,6 +503,8 @@ export default function App() {
       const savedMembers = await dbGet(DB_KEYS.HOUSE_MEMBERS);
       const savedHouseExp = await dbGet(DB_KEYS.HOUSE_EXPENSES);
       const savedHouseDep = await dbGet(DB_KEYS.HOUSE_DEPOSITS);
+      const savedMessCats = await dbGet(DB_KEYS.HOUSE_CATEGORIES);
+      const savedHouseRules = await dbGet(DB_KEYS.HOUSE_RULES_TEXT);
       const savedFbCfg = await dbGet(DB_KEYS.FIREBASE_CFG);
       const savedRoomKey = await dbGet(DB_KEYS.ROOM_KEY);
       const savedRoomCanEdit = await dbGet(DB_KEYS.ROOM_CAN_EDIT);
@@ -467,6 +514,7 @@ export default function App() {
 
       if (savedTheme === 'light' || savedTheme === 'dark') setTheme(savedTheme);
       if (savedHeader?.title) setHeaderMeta(savedHeader);
+      if (savedTabLabels && typeof savedTabLabels === 'object') setCustomTabLabels(savedTabLabels);
       if (Array.isArray(savedTabOrder)) {
         const mergedOrder = [
           ...savedTabOrder.filter((id) => TAB_CATALOG[id]),
@@ -559,18 +607,20 @@ export default function App() {
       if (Array.isArray(savedExp)) setPersonalExpenses(savedExp);
 
       const finalMembers =
-        Array.isArray(savedMembers) && savedMembers.length === 8
+        Array.isArray(savedMembers) && savedMembers.length > 0
           ? savedMembers
           : Array.from({ length: 8 }, (_, idx) => ({
               id: `member-${idx + 1}`,
-              name: `Friend ${idx + 1}`,
-              balance: 0,
+              name: `Member ${idx + 1}`,
+              balance: 1000,
             }));
       setHouseMembers(finalMembers);
       setPresentMemberIds(finalMembers.map((m) => m.id));
 
       if (Array.isArray(savedHouseExp)) setHouseExpenses(savedHouseExp);
       if (Array.isArray(savedHouseDep)) setHouseDeposits(savedHouseDep);
+      if (Array.isArray(savedMessCats) && savedMessCats.length > 0) setMessCategories(savedMessCats);
+      if (typeof savedHouseRules === 'string' && savedHouseRules.trim()) setHouseRulesText(savedHouseRules);
 
       setIsStorageReady(true);
     };
@@ -590,6 +640,9 @@ export default function App() {
   useEffect(() => {
     if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.TAB_ORDER, tabOrder);
   }, [tabOrder, isStorageReady, isAdminAuthenticated]);
+  useEffect(() => {
+    if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.TAB_LABELS, customTabLabels);
+  }, [customTabLabels, isStorageReady, isAdminAuthenticated]);
   useEffect(() => {
     if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.LOGS, entries);
   }, [entries, isStorageReady, isAdminAuthenticated]);
@@ -620,6 +673,12 @@ export default function App() {
   useEffect(() => {
     if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.HOUSE_DEPOSITS, houseDeposits);
   }, [houseDeposits, isStorageReady, isAdminAuthenticated]);
+  useEffect(() => {
+    if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.HOUSE_CATEGORIES, messCategories);
+  }, [messCategories, isStorageReady, isAdminAuthenticated]);
+  useEffect(() => {
+    if (isStorageReady && isAdminAuthenticated) dbSet(DB_KEYS.HOUSE_RULES_TEXT, houseRulesText);
+  }, [houseRulesText, isStorageReady, isAdminAuthenticated]);
   useEffect(() => {
     if (isStorageReady && isAdminAuthenticated && roomKey) dbSet(DB_KEYS.ROOM_KEY, roomKey);
   }, [roomKey, isStorageReady, isAdminAuthenticated]);
@@ -680,6 +739,9 @@ export default function App() {
             isApplyingRemoteRef.current = true;
             if (data.headerMeta?.title) setHeaderMeta(data.headerMeta);
             if (Array.isArray(data.tabOrder)) setTabOrder(data.tabOrder);
+            if (data.customTabLabels && typeof data.customTabLabels === 'object') {
+              setCustomTabLabels(data.customTabLabels);
+            }
             if (Array.isArray(data.entries)) setEntries(data.entries);
             if (Array.isArray(data.notes)) setNotes(data.notes);
             if (Array.isArray(data.roughNotes)) setRoughNotes(data.roughNotes);
@@ -712,11 +774,17 @@ export default function App() {
           if (snap.exists()) {
             const rData = snap.data();
             isApplyingRemoteRef.current = true;
-            if (Array.isArray(rData.houseMembers) && rData.houseMembers.length === 8) {
+            if (Array.isArray(rData.houseMembers) && rData.houseMembers.length > 0) {
               setHouseMembers(rData.houseMembers);
             }
             if (Array.isArray(rData.houseExpenses)) setHouseExpenses(rData.houseExpenses);
             if (Array.isArray(rData.houseDeposits)) setHouseDeposits(rData.houseDeposits);
+            if (Array.isArray(rData.messCategories) && rData.messCategories.length > 0) {
+              setMessCategories(rData.messCategories);
+            }
+            if (typeof rData.houseRulesText === 'string' && rData.houseRulesText.trim()) {
+              setHouseRulesText(rData.houseRulesText);
+            }
             setTimeout(() => {
               isApplyingRemoteRef.current = false;
             }, 300);
@@ -759,11 +827,17 @@ export default function App() {
             if (snap.exists()) {
               const rData = snap.data();
               isApplyingRemoteRef.current = true;
-              if (Array.isArray(rData.houseMembers) && rData.houseMembers.length === 8) {
+              if (Array.isArray(rData.houseMembers) && rData.houseMembers.length > 0) {
                 setHouseMembers(rData.houseMembers);
               }
               if (Array.isArray(rData.houseExpenses)) setHouseExpenses(rData.houseExpenses);
               if (Array.isArray(rData.houseDeposits)) setHouseDeposits(rData.houseDeposits);
+              if (Array.isArray(rData.messCategories) && rData.messCategories.length > 0) {
+                setMessCategories(rData.messCategories);
+              }
+              if (typeof rData.houseRulesText === 'string' && rData.houseRulesText.trim()) {
+                setHouseRulesText(rData.houseRulesText);
+              }
               setRoomKeyNotFound(false);
               setTimeout(() => {
                 isApplyingRemoteRef.current = false;
@@ -815,6 +889,7 @@ export default function App() {
           {
             headerMeta,
             tabOrder,
+            customTabLabels,
             entries: cloudSafeEntries,
             notes,
             roughNotes,
@@ -840,6 +915,7 @@ export default function App() {
     isStorageReady,
     headerMeta,
     tabOrder,
+    customTabLabels,
     entries,
     notes,
     roughNotes,
@@ -865,6 +941,8 @@ export default function App() {
             houseMembers,
             houseExpenses,
             houseDeposits,
+            messCategories,
+            houseRulesText,
             updatedAt: new Date().toISOString(),
           },
           { merge: true }
@@ -882,6 +960,8 @@ export default function App() {
     houseMembers,
     houseExpenses,
     houseDeposits,
+    messCategories,
+    houseRulesText,
   ]);
 
   const handleRegenerateRoomKey = async () => {
@@ -905,6 +985,8 @@ export default function App() {
             houseMembers,
             houseExpenses,
             houseDeposits,
+            messCategories,
+            houseRulesText,
             updatedAt: new Date().toISOString(),
           },
           { merge: true }
@@ -1057,6 +1139,9 @@ export default function App() {
   const textSecondary = isDark ? 'text-slate-300' : 'text-slate-600';
   const textMuted = isDark ? 'text-slate-400' : 'text-slate-500';
 
+  const getTabLabel = (tabId) =>
+    customTabLabels[tabId]?.trim() || TAB_CATALOG[tabId]?.label || tabId;
+
   const toggleTheme = () => {
     setTheme((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
@@ -1107,7 +1192,18 @@ export default function App() {
   const resetTabOrder = () => {
     if (!isAdminAuthenticated) return;
     setTabOrder(DEFAULT_TAB_ORDER);
-    showToast('Tab order restored to default.');
+    setCustomTabLabels({});
+    showToast('Tab order & names restored to default.');
+  };
+
+  const saveTabLabel = (tabId) => {
+    if (!isAdminAuthenticated) return;
+    const clean = tempTabLabel.trim();
+    if (clean) {
+      setCustomTabLabels((prev) => ({ ...prev, [tabId]: clean }));
+      showToast('Tab renamed.');
+    }
+    setEditingTabId(null);
   };
 
   const handlePdfUpload = (e) => {
@@ -1387,6 +1483,32 @@ export default function App() {
     showToast('Task added to To-Do list.');
   };
 
+  const startEditTodo = (todo) => {
+    if (!isAdminAuthenticated) return;
+    setEditingTodoId(todo.id);
+    setEditTodoText(todo.text);
+    setEditTodoPriority(todo.priority || 'Medium');
+    setEditTodoDueDate(todo.dueDate || '');
+  };
+
+  const saveEditTodo = (id) => {
+    if (!isAdminAuthenticated || !editTodoText.trim()) return;
+    setTodos((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              text: editTodoText.trim(),
+              priority: editTodoPriority,
+              dueDate: editTodoDueDate,
+            }
+          : t
+      )
+    );
+    setEditingTodoId(null);
+    showToast('Task updated.');
+  };
+
   const toggleTodo = (id) => {
     if (!isAdminAuthenticated) return;
     setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
@@ -1460,7 +1582,6 @@ export default function App() {
   };
 
   const copyTextValue = (id, text) => {
-    if (!isAdminAuthenticated) return;
     navigator.clipboard?.writeText(text);
     setCopiedId(id);
     showToast('Copied to clipboard.');
@@ -1587,15 +1708,77 @@ export default function App() {
   };
 
   const houseStats = useMemo(() => {
+    const memberCount = Math.max(houseMembers.length, 1);
+    let mealSpend = 0;
+    let grocerySpend = 0;
+    const memberAgg = {};
+    houseMembers.forEach((m) => {
+      memberAgg[m.id] = { mealDeducted: 0, groceryDeducted: 0, mealsAttended: 0 };
+    });
+
+    houseExpenses.forEach((exp) => {
+      const items =
+        Array.isArray(exp.items) && exp.items.length > 0
+          ? exp.items
+          : [
+              {
+                name: exp.detail || '',
+                amount: Number(exp.amount || 0),
+                category: exp.category === 'Groceries' ? 'Custom' : 'Roti/Naan',
+                splitType: exp.category === 'Groceries' ? 'Grocery' : 'Meal',
+              },
+            ];
+
+      let expMeal = 0;
+      let expGrocery = 0;
+      items.forEach((it) => {
+        const amt = Number(it.amount || 0);
+        if (it.splitType === 'Grocery') expGrocery += amt;
+        else expMeal += amt;
+      });
+
+      mealSpend += expMeal;
+      grocerySpend += expGrocery;
+
+      const pIds =
+        Array.isArray(exp.participantIds) && exp.participantIds.length > 0
+          ? exp.participantIds
+          : exp.category === 'Groceries'
+          ? houseMembers.map((m) => m.id)
+          : presentMemberIds;
+
+      const perHeadMeal = expMeal > 0 && pIds.length > 0 ? expMeal / pIds.length : 0;
+      const perHeadGrocery = expGrocery > 0 ? expGrocery / memberCount : 0;
+
+      houseMembers.forEach((m) => {
+        if (memberAgg[m.id]) {
+          memberAgg[m.id].groceryDeducted += perHeadGrocery;
+        }
+      });
+
+      pIds.forEach((id) => {
+        if (memberAgg[id]) {
+          if (expMeal > 0) {
+            memberAgg[id].mealDeducted += perHeadMeal;
+            memberAgg[id].mealsAttended += 1;
+          }
+        }
+      });
+    });
+
     const totalMemberBalances = houseMembers.reduce((sum, m) => sum + Number(m.balance || 0), 0);
-    const totalHouseSpent = houseExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const totalHouseSpent = mealSpend + grocerySpend;
     const totalCollectedPool = totalMemberBalances + totalHouseSpent;
+
     return {
       totalCollectedPool,
       totalHouseSpent,
+      mealSpend,
+      grocerySpend,
       creditRemaining: totalMemberBalances,
+      memberAgg,
     };
-  }, [houseMembers, houseExpenses]);
+  }, [houseMembers, houseExpenses, presentMemberIds]);
 
   const toggleHouseMeal = (meal) => {
     setHouseExpMeals((prev) => {
@@ -1610,6 +1793,26 @@ export default function App() {
     setPresentMemberIds((prev) =>
       prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
     );
+  };
+
+  const handleAddHouseMember = () => {
+    if (!canEditHouseInRoomMode) return;
+    const nextIdx = houseMembers.length + 1;
+    const newId = `member-${Date.now()}`;
+    setHouseMembers((prev) => [
+      ...prev,
+      { id: newId, name: `Member ${nextIdx}`, balance: 1000 },
+    ]);
+    setPresentMemberIds((prev) => [...prev, newId]);
+    showToast(`Added Member ${nextIdx} with Rs. 1,000 balance.`);
+  };
+
+  const handleRemoveHouseMember = (memberId) => {
+    if (!canEditHouseInRoomMode || houseMembers.length <= 1) return;
+    const target = houseMembers.find((m) => m.id === memberId);
+    setHouseMembers((prev) => prev.filter((m) => m.id !== memberId));
+    setPresentMemberIds((prev) => prev.filter((id) => id !== memberId));
+    showToast(`Removed ${target?.name || 'member'}.`);
   };
 
   const startEditMember = (member) => {
@@ -1658,124 +1861,276 @@ export default function App() {
     ]);
     setTopUpMemberId(null);
     setMemberTopUpAmount('');
-    showToast(`Topped up ${member?.name} by +${formatMoney(addAmt)}.`);
+    showToast(`Topped up ${member?.name} by +${formatPKR(addAmt)}.`);
   };
+
+  const handleBulkMemberTopUp = (e) => {
+    e.preventDefault();
+    if (!canEditHouseInRoomMode) return;
+    const addAmt = parseFloat(bulkTopUpAmount);
+    if (!addAmt || addAmt <= 0) {
+      showToast('Enter a valid bulk top-up amount.', 'error');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const newDeps = houseMembers.map((m, idx) => ({
+      id: `bdep-${Date.now()}-${idx}`,
+      date: getTodayStr(),
+      memberId: m.id,
+      memberName: m.name,
+      amount: addAmt,
+      createdAt: nowIso,
+    }));
+    setHouseMembers((prev) =>
+      prev.map((m) => ({ ...m, balance: Number(m.balance || 0) + addAmt }))
+    );
+    setHouseDeposits((prev) => [...newDeps, ...prev]);
+    setBulkTopUpAmount('');
+    setShowBulkTopUp(false);
+    showToast(`Added ${formatPKR(addAmt)} to all ${houseMembers.length} members.`);
+  };
+
+  const startEditDeposit = (dep) => {
+    if (!canEditHouseInRoomMode) return;
+    setEditingDepositId(dep.id);
+    setEditDepositAmount(String(dep.amount));
+    setEditDepositDate(dep.date || getTodayStr());
+  };
+
+  const saveEditDeposit = (dep) => {
+    if (!canEditHouseInRoomMode) return;
+    const newAmt = parseFloat(editDepositAmount);
+    if (isNaN(newAmt) || newAmt < 0) {
+      showToast('Enter a valid deposit amount.', 'error');
+      return;
+    }
+    const diff = newAmt - Number(dep.amount || 0);
+    setHouseMembers((prev) =>
+      prev.map((m) =>
+        m.id === dep.memberId ? { ...m, balance: Number(m.balance || 0) + diff } : m
+      )
+    );
+    setHouseDeposits((prev) =>
+      prev.map((d) =>
+        d.id === dep.id ? { ...d, amount: newAmt, date: editDepositDate || d.date } : d
+      )
+    );
+    setEditingDepositId(null);
+    showToast('Deposit updated & member balance adjusted.');
+  };
+
+  const deleteDepositRecord = (dep) => {
+    if (!canEditHouseInRoomMode) return;
+    setHouseMembers((prev) =>
+      prev.map((m) =>
+        m.id === dep.memberId
+          ? { ...m, balance: Number(m.balance || 0) - Number(dep.amount || 0) }
+          : m
+      )
+    );
+    setHouseDeposits((prev) => prev.filter((d) => d.id !== dep.id));
+    showToast('Deposit deleted & deducted from member balance.');
+  };
+
+  const handleAddMessCategory = (e) => {
+    e.preventDefault();
+    if (!canEditHouseInRoomMode) return;
+    const clean = newMessCategoryInput.trim();
+    if (!clean) return;
+    if (messCategories.some((c) => c.toLowerCase() === clean.toLowerCase())) {
+      showToast('Category already exists.', 'error');
+      return;
+    }
+    setMessCategories((prev) => [...prev, clean]);
+    setNewMessCategoryInput('');
+    showToast(`Added category "${clean}".`);
+  };
+
+  const handleDeleteMessCategory = (catToRemove) => {
+    if (!canEditHouseInRoomMode || messCategories.length <= 1) return;
+    setMessCategories((prev) => prev.filter((c) => c !== catToRemove));
+    showToast(`Removed category "${catToRemove}".`);
+  };
+
+  const addHouseItemRow = () => {
+    setHouseExpItems((prev) => [
+      ...prev,
+      {
+        id: `hitem-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: '',
+        amount: '',
+        category: messCategories[0] || 'Custom',
+        splitType: houseExpCategory === 'Groceries' ? 'Grocery' : 'Meal',
+      },
+    ]);
+  };
+
+  const updateHouseItemRow = (id, field, value) => {
+    setHouseExpItems((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const removeHouseItemRow = (id) => {
+    setHouseExpItems((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
+  };
+
+  const housePreview = useMemo(() => {
+    const memberCount = Math.max(houseMembers.length, 1);
+    const hasRowAmounts = houseExpItems.some((r) => parseFloat(r.amount) > 0);
+    let mealTotal = 0;
+    let groceryTotal = 0;
+
+    if (hasRowAmounts) {
+      houseExpItems.forEach((r) => {
+        const amt = parseFloat(r.amount) || 0;
+        if (r.splitType === 'Grocery') groceryTotal += amt;
+        else mealTotal += amt;
+      });
+    } else {
+      const singleAmt = parseFloat(houseExpAmount) || 0;
+      if (houseExpCategory === 'Groceries') groceryTotal = singleAmt;
+      else mealTotal = singleAmt;
+    }
+
+    const presentCount =
+      houseExpCategory === 'Groceries' ? houseMembers.length : presentMemberIds.length;
+    const perPresentMeal = presentCount > 0 ? mealTotal / presentCount : 0;
+    const perMemberGrocery = groceryTotal / memberCount;
+    const billTotal = mealTotal + groceryTotal;
+
+    return {
+      mealTotal,
+      groceryTotal,
+      billTotal,
+      presentCount,
+      perPresentMeal,
+      perMemberGrocery,
+      hasRowAmounts,
+    };
+  }, [houseExpItems, houseExpAmount, houseExpCategory, houseMembers.length, presentMemberIds.length]);
 
   const handleSaveHouseExpense = (e) => {
     e.preventDefault();
     if (!canEditHouseInRoomMode) return;
-    const numericAmt = parseFloat(houseExpAmount);
+
+    const numericAmt = housePreview.billTotal;
     if (!numericAmt || numericAmt <= 0) {
       showToast('Please enter a valid house expense amount.', 'error');
       return;
     }
 
+    const targetIds =
+      houseExpCategory === 'Groceries' ? houseMembers.map((m) => m.id) : presentMemberIds;
+
+    if (housePreview.mealTotal > 0 && targetIds.length === 0) {
+      showToast('Select at least 1 present member for Meal expense.', 'error');
+      return;
+    }
+
+    const normalizedItems = housePreview.hasRowAmounts
+      ? houseExpItems
+          .filter((r) => parseFloat(r.amount) > 0)
+          .map((r) => ({
+            id: r.id,
+            name: r.name.trim(),
+            amount: parseFloat(r.amount) || 0,
+            category: r.category || 'Custom',
+            splitType: r.splitType || (houseExpCategory === 'Groceries' ? 'Grocery' : 'Meal'),
+          }))
+      : [
+          {
+            id: `hitem-${Date.now()}`,
+            name:
+              houseExpDetail.trim() ||
+              (houseExpCategory === 'Groceries'
+                ? 'House Groceries'
+                : `${houseExpMeals.join(', ')} Mess`),
+            amount: numericAmt,
+            category: houseExpCategory === 'Groceries' ? 'Custom' : 'Roti/Naan',
+            splitType: houseExpCategory === 'Groceries' ? 'Grocery' : 'Meal',
+          },
+        ];
+
+    const newSplits = {};
+    houseMembers.forEach((m) => {
+      const inMeal = housePreview.mealTotal > 0 && targetIds.includes(m.id);
+      const share =
+        (inMeal ? housePreview.perPresentMeal : 0) + housePreview.perMemberGrocery;
+      newSplits[m.id] = share;
+    });
+
+    const mealLabel = isMultiMealMode ? houseExpMeals.join(', ') : 'Dinner';
+    const baseMembers = editingHouseExpId
+      ? houseMembers.map((m) => {
+          const oldExp = houseExpenses.find((x) => x.id === editingHouseExpId);
+          const refunded = oldExp?.splits ? Number(oldExp.splits[m.id] || 0) : 0;
+          return { ...m, balance: Number(m.balance || 0) + refunded };
+        })
+      : houseMembers;
+
+    const updatedMembers = baseMembers.map((m) => ({
+      ...m,
+      balance: Number(m.balance || 0) - (newSplits[m.id] || 0),
+    }));
+
+    const recordPayload = {
+      id: editingHouseExpId || `hexp-${Date.now()}`,
+      date: houseExpDate,
+      category: houseExpCategory,
+      mealType: mealLabel,
+      meals: houseExpCategory === 'Meal' ? houseExpMeals : [],
+      detail:
+        houseExpDetail.trim() ||
+        normalizedItems.map((i) => i.name || i.category).filter(Boolean).join(', ') ||
+        (houseExpCategory === 'Groceries' ? 'House Groceries' : `${mealLabel} Mess`),
+      amount: numericAmt,
+      items: normalizedItems,
+      splitMode:
+        houseExpCategory === 'Groceries'
+          ? `All ${houseMembers.length} Members`
+          : 'Present Members Only',
+      participantIds: targetIds,
+      perHead:
+        housePreview.mealTotal > 0 && housePreview.groceryTotal === 0
+          ? housePreview.perPresentMeal
+          : housePreview.groceryTotal > 0 && housePreview.mealTotal === 0
+          ? housePreview.perMemberGrocery
+          : housePreview.perPresentMeal + housePreview.perMemberGrocery,
+      splits: newSplits,
+      calcSnapshot: {
+        mealTotal: housePreview.mealTotal,
+        groceryTotal: housePreview.groceryTotal,
+        billTotal: housePreview.billTotal,
+        presentCount: targetIds.length,
+        perPresentMeal: housePreview.perPresentMeal,
+        perMemberGrocery: housePreview.perMemberGrocery,
+      },
+    };
+
+    setHouseMembers(updatedMembers);
     if (editingHouseExpId) {
-      const oldExp = houseExpenses.find((x) => x.id === editingHouseExpId);
-      let restoredMembers = [...houseMembers];
-      if (oldExp && oldExp.splits) {
-        restoredMembers = restoredMembers.map((m) => ({
-          ...m,
-          balance: Number(m.balance || 0) + Number(oldExp.splits[m.id] || 0),
-        }));
-      }
-
-      const targetIds =
-        houseExpCategory === 'Groceries' ? restoredMembers.map((m) => m.id) : presentMemberIds;
-
-      if (targetIds.length === 0) {
-        showToast('Select at least 1 present member for Meal expense.', 'error');
-        return;
-      }
-
-      const perHead = numericAmt / targetIds.length;
-      const newSplits = {};
-      targetIds.forEach((id) => {
-        newSplits[id] = perHead;
-      });
-
-      const updatedMembers = restoredMembers.map((m) => ({
-        ...m,
-        balance: Number(m.balance || 0) - (newSplits[m.id] || 0),
-      }));
-
-      setHouseMembers(updatedMembers);
       setHouseExpenses((prev) =>
-        prev.map((item) =>
-          item.id === editingHouseExpId
-            ? {
-                ...item,
-                date: houseExpDate,
-                category: houseExpCategory,
-                meals: houseExpCategory === 'Meal' ? houseExpMeals : [],
-                detail:
-                  houseExpDetail.trim() ||
-                  (houseExpCategory === 'Meal'
-                    ? `${houseExpMeals.join(', ')} Mess`
-                    : 'House Groceries'),
-                amount: numericAmt,
-                splitMode:
-                  houseExpCategory === 'Groceries' ? 'All 8 Members' : 'Present Members Only',
-                participantIds: targetIds,
-                perHead,
-                splits: newSplits,
-              }
-            : item
-        )
+        prev.map((item) => (item.id === editingHouseExpId ? recordPayload : item))
       );
       setEditingHouseExpId(null);
       showToast('House expense updated & member balances adjusted.');
     } else {
-      const targetIds =
-        houseExpCategory === 'Groceries' ? houseMembers.map((m) => m.id) : presentMemberIds;
-
-      if (targetIds.length === 0) {
-        showToast('Toggle at least 1 member as Present for Meal.', 'error');
-        return;
-      }
-
-      const perHead = numericAmt / targetIds.length;
-      const splits = {};
-      targetIds.forEach((id) => {
-        splits[id] = perHead;
-      });
-
-      setHouseMembers((prev) =>
-        prev.map((m) => ({
-          ...m,
-          balance: Number(m.balance || 0) - (splits[m.id] || 0),
-        }))
-      );
-
-      setHouseExpenses((prev) => [
-        {
-          id: `hexp-${Date.now()}`,
-          date: houseExpDate,
-          category: houseExpCategory,
-          meals: houseExpCategory === 'Meal' ? houseExpMeals : [],
-          detail:
-            houseExpDetail.trim() ||
-            (houseExpCategory === 'Meal'
-              ? `${houseExpMeals.join(', ')} Mess`
-              : 'House Groceries'),
-          amount: numericAmt,
-          splitMode:
-            houseExpCategory === 'Groceries' ? 'All 8 Members' : 'Present Members Only',
-          participantIds: targetIds,
-          perHead,
-          splits,
-        },
-        ...prev,
-      ]);
-      showToast(
-        houseExpCategory === 'Groceries'
-          ? `Groceries (${formatMoney(numericAmt)}) split equally across all 8 members (${formatMoney(perHead)}/each).`
-          : `Meal (${formatMoney(numericAmt)}) split across ${targetIds.length} present members (${formatMoney(perHead)}/each).`
-      );
+      setHouseExpenses((prev) => [recordPayload, ...prev]);
+      showToast(`Saved ${formatPKR(numericAmt)} and updated all ${houseMembers.length} balances.`);
     }
 
     setHouseExpDetail('');
     setHouseExpAmount('');
+    setHouseExpItems([
+      {
+        id: `hitem-${Date.now()}`,
+        name: '',
+        amount: '',
+        category: messCategories[0] || 'Vegetables',
+        splitType: 'Meal',
+      },
+    ]);
     setHouseExpCategory('Meal');
     setHouseExpMeals(['Dinner']);
   };
@@ -1784,10 +2139,22 @@ export default function App() {
     if (!canEditHouseInRoomMode) return;
     setEditingHouseExpId(exp.id);
     setHouseExpDate(exp.date);
-    setHouseExpCategory(exp.category);
+    setHouseExpCategory(exp.category || 'Meal');
     setHouseExpMeals(exp.meals && exp.meals.length ? exp.meals : ['Dinner']);
-    setHouseExpDetail(exp.detail);
-    setHouseExpAmount(String(exp.amount));
+    setIsMultiMealMode(Boolean(exp.meals && exp.meals.length > 0 && exp.mealType !== 'Dinner'));
+    setHouseExpDetail(exp.detail || '');
+    setHouseExpAmount(String(exp.amount || ''));
+    if (Array.isArray(exp.items) && exp.items.length > 0) {
+      setHouseExpItems(
+        exp.items.map((it, idx) => ({
+          id: it.id || `hitem-edit-${idx}`,
+          name: it.name || '',
+          amount: String(it.amount ?? ''),
+          category: it.category || 'Custom',
+          splitType: it.splitType || (exp.category === 'Groceries' ? 'Grocery' : 'Meal'),
+        }))
+      );
+    }
     if (exp.participantIds) setPresentMemberIds(exp.participantIds);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1809,6 +2176,53 @@ export default function App() {
       setHouseExpAmount('');
     }
     showToast('House expense deleted & amounts refunded to members.');
+  };
+
+  const copyHouseBillWhatsApp = (exp) => {
+    const memberCount = Math.max(houseMembers.length, 1);
+    const snap = exp.calcSnapshot || {
+      mealTotal: exp.category === 'Groceries' ? 0 : Number(exp.amount || 0),
+      groceryTotal: exp.category === 'Groceries' ? Number(exp.amount || 0) : 0,
+      billTotal: Number(exp.amount || 0),
+      presentCount: exp.participantIds?.length || memberCount,
+      perPresentMeal: exp.category === 'Groceries' ? 0 : Number(exp.perHead || 0),
+      perMemberGrocery: exp.category === 'Groceries' ? Number(exp.perHead || 0) : 0,
+    };
+    const itemsList =
+      Array.isArray(exp.items) && exp.items.length > 0
+        ? exp.items
+        : [{ category: exp.category, name: exp.detail, amount: exp.amount, splitType: exp.category === 'Groceries' ? 'Grocery' : 'Meal' }];
+
+    let text = `*MessMate Bill Summary*\n📅 ${formatDateDisplay(exp.date)} | 🍽️ ${exp.mealType || 'Dinner'}\n\n*Items:*\n`;
+    itemsList.forEach((it) => {
+      const icon = it.splitType === 'Grocery' ? '🛒' : '🍛';
+      const note = it.name ? ` (${it.name})` : '';
+      text += `${icon} ${it.category}${note}: Rs.${formatMoney(it.amount)}\n`;
+    });
+    text += `\n*Calculation:*\n`;
+    text += `Total Meal: Rs.${formatMoney(snap.mealTotal)} (÷ ${snap.presentCount} present) = Rs.${Math.round(snap.perPresentMeal)}/head\n`;
+    text += `Total Grocery: Rs.${formatMoney(snap.groceryTotal)} (÷ ${memberCount} all) = Rs.${Math.round(snap.perMemberGrocery)}/head\n`;
+    text += `Total Bill: *Rs.${formatMoney(snap.billTotal)}*\n\n`;
+    text += `*Per Person Charge:*\n`;
+    text += `Present members pay: *Rs.${Math.round(snap.perPresentMeal + snap.perMemberGrocery)}*\n`;
+    text += `Absent members pay: *Rs.${Math.round(snap.perMemberGrocery)}*\n`;
+
+    const absentees = houseMembers.filter((m) => !(exp.participantIds || []).includes(m.id)).map((m) => m.name);
+    if (exp.category !== 'Groceries' && absentees.length > 0) {
+      text += `\n*Absentees:* ${absentees.join(', ')}\n`;
+    }
+    text += `\n_Generated by MessMate_`;
+    copyTextValue(`wa-${exp.id}`, text);
+  };
+
+  const copyHouseBalancesWhatsApp = () => {
+    let text = `*MessMate Status Update*\nTotal Pool: ${formatPKR(houseStats.totalCollectedPool)}\nNet Remaining: ${formatPKR(houseStats.creditRemaining)}\n\n*Member Balances:*\n`;
+    houseMembers.forEach((m) => {
+      const bal = Number(m.balance || 0);
+      const flag = bal < 0 ? '🔴' : bal < 200 ? '🟡' : '🟢';
+      text += `${flag} ${m.name}: ${formatPKR(Math.round(bal))}\n`;
+    });
+    copyTextValue('wa-balances', text);
   };
 
   const sortedEntries = useMemo(() => {
@@ -1834,11 +2248,12 @@ export default function App() {
   );
 
   const buildFullPayload = () => ({
-    version: 6,
+    version: 7,
     exportedAt: new Date().toISOString(),
     theme,
     headerMeta,
     tabOrder,
+    customTabLabels,
     entries,
     notes,
     roughNotes,
@@ -1849,6 +2264,8 @@ export default function App() {
     houseMembers,
     houseExpenses,
     houseDeposits,
+    messCategories,
+    houseRulesText,
     allowedStandardUsers,
     roomKey,
     roomCanEdit,
@@ -1860,6 +2277,9 @@ export default function App() {
     if (parsed.theme === 'dark' || parsed.theme === 'light') setTheme(parsed.theme);
     if (parsed.headerMeta?.title) setHeaderMeta(parsed.headerMeta);
     if (Array.isArray(parsed.tabOrder)) setTabOrder(parsed.tabOrder);
+    if (parsed.customTabLabels && typeof parsed.customTabLabels === 'object') {
+      setCustomTabLabels(parsed.customTabLabels);
+    }
     if (Array.isArray(parsed.entries)) setEntries(parsed.entries);
     if (Array.isArray(parsed.notes)) setNotes(parsed.notes);
     if (Array.isArray(parsed.roughNotes)) setRoughNotes(parsed.roughNotes);
@@ -1870,6 +2290,8 @@ export default function App() {
     if (Array.isArray(parsed.houseMembers)) setHouseMembers(parsed.houseMembers);
     if (Array.isArray(parsed.houseExpenses)) setHouseExpenses(parsed.houseExpenses);
     if (Array.isArray(parsed.houseDeposits)) setHouseDeposits(parsed.houseDeposits);
+    if (Array.isArray(parsed.messCategories)) setMessCategories(parsed.messCategories);
+    if (typeof parsed.houseRulesText === 'string') setHouseRulesText(parsed.houseRulesText);
     if (Array.isArray(parsed.allowedStandardUsers)) {
       setAllowedStandardUsers(parsed.allowedStandardUsers);
     }
@@ -1946,8 +2368,8 @@ export default function App() {
     setHouseMembers(
       Array.from({ length: 8 }, (_, idx) => ({
         id: `member-${idx + 1}`,
-        name: `Friend ${idx + 1}`,
-        balance: 0,
+        name: `Member ${idx + 1}`,
+        balance: 1000,
       }))
     );
     setConfirmReset(false);
@@ -2148,7 +2570,7 @@ export default function App() {
                   <h1
                     className={`font-bold text-base sm:text-lg tracking-tight leading-tight truncate ${textPrimary}`}
                   >
-                    {isPublicOrRoommateLocked ? '8-Friends Mess Status' : headerMeta.title}
+                    {isPublicOrRoommateLocked ? getTabLabel('house') : headerMeta.title}
                   </h1>
                   <p className={`text-[11px] truncate ${textMuted}`}>
                     {isPublicOrRoommateLocked
@@ -2241,7 +2663,7 @@ export default function App() {
                   }`}
                 >
                   <IconComponent className="w-4 h-4 shrink-0" />
-                  <span>{tab.label}</span>
+                  <span>{getTabLabel(tab.id)}</span>
                   {isPublicOrRoommateLocked && (
                     <span className="ml-1 px-2 py-0.5 rounded-full bg-slate-950/20 text-[10px] font-bold">
                       Read Only User
@@ -3117,55 +3539,115 @@ ${item.details}`
                     filteredTodos.map((todo) => (
                       <div
                         key={todo.id}
-                        className={`flex items-center justify-between gap-3 p-3.5 rounded-2xl border ${
+                        className={`p-3.5 rounded-2xl border ${
                           todo.completed
-                            ? 'bg-emerald-500/10 border-emerald-400/20 opacity-75'
+                            ? 'bg-emerald-500/10 border-emerald-400/20 opacity-85'
                             : glassSubCard
                         }`}
                       >
-                        <button
-                          onClick={() => toggleTodo(todo.id)}
-                          className="flex items-start gap-3 text-left flex-1 min-w-0"
-                        >
-                          <span
-                            className={`w-5 h-5 rounded-lg border flex items-center justify-center mt-0.5 shrink-0 ${
-                              todo.completed
-                                ? 'bg-emerald-500 border-emerald-400 text-slate-950'
-                                : 'border-slate-400'
-                            }`}
-                          >
-                            {todo.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                          </span>
-                          <div className="min-w-0">
-                            <p
-                              className={`text-sm font-medium ${
-                                todo.completed ? `line-through ${textMuted}` : textPrimary
-                              }`}
-                            >
-                              {todo.text}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span
-                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                                  PRIORITY_STYLES[todo.priority] || PRIORITY_STYLES.Medium
-                                }`}
+                        {editingTodoId === todo.id ? (
+                          <div className="space-y-2.5">
+                            <input
+                              type="text"
+                              value={editTodoText}
+                              onChange={(e) => setEditTodoText(e.target.value)}
+                              className={`w-full px-3 py-2 rounded-xl text-sm ${glassInput}`}
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={editTodoPriority}
+                                onChange={(e) => setEditTodoPriority(e.target.value)}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs ${glassInput}`}
                               >
-                                {todo.priority}
-                              </span>
-                              {todo.dueDate && (
-                                <span className={`text-[11px] flex items-center gap-1 ${textMuted}`}>
-                                  <Calendar className="w-3 h-3" /> {formatDateDisplay(todo.dueDate)}
-                                </span>
-                              )}
+                                <option value="High" className={isDark ? 'bg-slate-900' : 'bg-white'}>
+                                  High
+                                </option>
+                                <option value="Medium" className={isDark ? 'bg-slate-900' : 'bg-white'}>
+                                  Medium
+                                </option>
+                                <option value="Low" className={isDark ? 'bg-slate-900' : 'bg-white'}>
+                                  Low
+                                </option>
+                              </select>
+                              <input
+                                type="date"
+                                value={editTodoDueDate}
+                                onChange={(e) => setEditTodoDueDate(e.target.value)}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs ${glassInput}`}
+                              />
+                              <div className="ml-auto flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => saveEditTodo(todo.id)}
+                                  className="px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 font-semibold text-xs"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingTodoId(null)}
+                                  className={`px-2.5 py-1 rounded-lg text-xs ${textMuted}`}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </button>
-                        <button
-                          onClick={() => deleteTodo(todo.id)}
-                          className={`p-1.5 rounded-lg ${textMuted} hover:text-rose-500`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        ) : (
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              onClick={() => toggleTodo(todo.id)}
+                              className="flex items-start gap-3 text-left flex-1 min-w-0"
+                            >
+                              <span
+                                className={`w-5 h-5 rounded-lg border flex items-center justify-center mt-0.5 shrink-0 ${
+                                  todo.completed
+                                    ? 'bg-emerald-500 border-emerald-400 text-slate-950'
+                                    : 'border-slate-400'
+                                }`}
+                              >
+                                {todo.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                              </span>
+                              <div className="min-w-0">
+                                <p
+                                  className={`text-sm font-medium ${
+                                    todo.completed ? `line-through ${textMuted}` : textPrimary
+                                  }`}
+                                >
+                                  {todo.text}
+                                </p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span
+                                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                                      PRIORITY_STYLES[todo.priority] || PRIORITY_STYLES.Medium
+                                    }`}
+                                  >
+                                    {todo.priority}
+                                  </span>
+                                  {todo.dueDate && (
+                                    <span className={`text-[11px] flex items-center gap-1 ${textMuted}`}>
+                                      <Calendar className="w-3 h-3" /> {formatDateDisplay(todo.dueDate)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => startEditTodo(todo)}
+                                className={`p-1.5 rounded-lg ${textMuted} hover:text-amber-500`}
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => deleteTodo(todo.id)}
+                                className={`p-1.5 rounded-lg ${textMuted} hover:text-rose-500`}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -3671,8 +4153,8 @@ ${item.details}`
                     <Key className="w-4 h-4 text-amber-500 shrink-0" />
                     <span className={`text-xs sm:text-sm font-semibold ${textPrimary}`}>
                       {roommateModeKey
-                        ? `Viewing 8-Friends Mess Status (Key: ${roommateModeKey})`
-                        : 'Enter Mess Key to View Live 8-Friends Mess Status'}
+                        ? `Viewing ${getTabLabel('house')} Status (Key: ${roommateModeKey})`
+                        : `Enter Mess Key to View Live ${getTabLabel('house')} Status`}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -3739,70 +4221,313 @@ ${item.details}`
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className={`${glassCard} rounded-3xl p-5`}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-medium ${textSecondary}`}>Total Collected Pool</span>
+                      <span className={`text-xs font-medium ${textSecondary}`}>Total Pool Collected</span>
                       <Coins className="w-4 h-4 text-emerald-500" />
                     </div>
-                    <div className={`text-2xl font-bold ${textPrimary}`}>
-                      {formatMoney(houseStats.totalCollectedPool)}
+                    <div className={`text-2xl font-bold font-mono ${textPrimary}`}>
+                      {formatPKR(houseStats.totalCollectedPool)}
                     </div>
                     <p className={`text-[11px] mt-1 ${textMuted}`}>
-                      Combined contributions from all 8 housemates
+                      Combined contributions from all {houseMembers.length} housemates
                     </p>
                   </div>
 
                   <div className={`${glassCard} rounded-3xl p-5`}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`text-xs font-medium ${textSecondary}`}>Total House Expenses</span>
+                      <span className={`text-xs font-medium ${textSecondary}`}>Total Expense to Date</span>
                       <TrendingDown className="w-4 h-4 text-rose-500" />
                     </div>
-                    <div className="text-2xl font-bold text-rose-500">
-                      {formatMoney(houseStats.totalHouseSpent)}
+                    <div className="text-2xl font-bold font-mono text-rose-500">
+                      {formatPKR(houseStats.totalHouseSpent)}
                     </div>
-                    <p className={`text-[11px] mt-1 ${textMuted}`}>
-                      {houseExpenses.length} shared mess & grocery bills
+                    <p className={`text-[11px] mt-1 font-medium ${textMuted}`}>
+                      Meals: {formatPKR(houseStats.mealSpend)} | Groceries: {formatPKR(houseStats.grocerySpend)}
                     </p>
                   </div>
 
                   <div className={`${glassCard} rounded-3xl p-5`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className={`text-xs font-medium ${textSecondary}`}>
-                        Pool Credit Remaining
+                        Net Remaining Pool
                       </span>
                       <PiggyBank className="w-4 h-4 text-cyan-500" />
                     </div>
-                    <div className="text-2xl font-bold text-cyan-500">
-                      {formatMoney(houseStats.creditRemaining)}
+                    <div className="text-2xl font-bold font-mono text-cyan-500">
+                      {formatPKR(houseStats.creditRemaining)}
                     </div>
                     <p className={`text-[11px] mt-1 ${textMuted}`}>
-                      Sum of all 8 members&apos; current balances
+                      Sum of all {houseMembers.length} members&apos; current wallet balances
                     </p>
                   </div>
+                </div>
+
+                {/* Editable Split Rules Banner */}
+                <div className={`${glassCard} rounded-3xl p-4 sm:p-5`}>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-500 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" /> Mess Split Rules & Notes
+                    </span>
+                    {canEditHouseInRoomMode && !isEditingHouseRules && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempHouseRulesText(houseRulesText);
+                          setIsEditingHouseRules(true);
+                        }}
+                        className={`inline-flex items-center gap-1 text-xs font-medium ${textMuted} hover:text-amber-500`}
+                      >
+                        <Edit3 className="w-3.5 h-3.5" /> Edit Rules
+                      </button>
+                    )}
+                  </div>
+                  {isEditingHouseRules && canEditHouseInRoomMode ? (
+                    <div className="space-y-2.5">
+                      <textarea
+                        rows={3}
+                        value={tempHouseRulesText}
+                        onChange={(e) => setTempHouseRulesText(e.target.value)}
+                        className={`w-full px-3.5 py-2 rounded-xl text-xs leading-relaxed ${glassInput}`}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHouseRulesText(tempHouseRulesText.trim() || DEFAULT_HOUSE_RULES);
+                            setIsEditingHouseRules(false);
+                            showToast('Mess rules updated.');
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-semibold text-xs"
+                        >
+                          Save Rules
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingHouseRules(false)}
+                          className={`px-3 py-1.5 rounded-xl ${glassSubCard} text-xs ${textMuted}`}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className={`text-xs whitespace-pre-line leading-relaxed ${textSecondary}`}>
+                      {houseRulesText}
+                    </p>
+                  )}
                 </div>
 
                 <div className={`${glassCard} rounded-3xl p-5 sm:p-6`}>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                     <div>
                       <h2 className={`font-bold text-base sm:text-lg flex items-center gap-2 ${textPrimary}`}>
-                        <Users className="w-5 h-5 text-emerald-500" /> 8 House Members & Individual Balances
+                        <Users className="w-5 h-5 text-emerald-500" /> Member Wallets ({houseMembers.length} Housemates)
                       </h2>
                       <p className={`text-xs mt-0.5 ${textMuted}`}>
                         {canEditHouseInRoomMode
-                          ? 'Edit any friend’s name or balance directly, or use + Top Up to deposit money.'
-                          : 'Live individual balances for all 8 housemates (Read-Only User).'}
+                          ? 'Edit any member’s name or balance, add/remove members, or top up wallets.'
+                          : 'Live individual wallet balances for all housemates (Read-Only User).'}
                       </p>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canEditHouseInRoomMode && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setShowDepositLedger((prev) => !prev)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl ${glassSubCard} text-xs font-semibold text-cyan-500 hover:bg-cyan-500/10`}
+                          >
+                            <Coins className="w-3.5 h-3.5" />
+                            Deposits ({houseDeposits.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={copyHouseBalancesWhatsApp}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl ${glassSubCard} text-xs font-semibold text-emerald-500 hover:bg-emerald-500/10`}
+                          >
+                            {copiedId === 'wa-balances' ? (
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                            ) : (
+                              <Share2 className="w-3.5 h-3.5" />
+                            )}
+                            Copy Balances
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAddHouseMember}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl ${glassSubCard} text-xs font-semibold text-amber-500 hover:bg-amber-500/10`}
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> + Member
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowBulkTopUp((prev) => !prev);
+                              setBulkTopUpAmount('');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 text-xs font-bold shadow-md"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Bulk Top-Up (All {houseMembers.length})
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
+
+                  {canEditHouseInRoomMode && showBulkTopUp && (
+                    <form
+                      onSubmit={handleBulkMemberTopUp}
+                      className={`${glassSubCard} rounded-2xl p-3.5 mb-4 flex flex-wrap items-center justify-between gap-3 border-emerald-400/35`}
+                    >
+                      <span className={`text-xs font-semibold ${textPrimary}`}>
+                        Add amount to <strong>EVERY</strong> member&apos;s wallet:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="1000"
+                          value={bulkTopUpAmount}
+                          onChange={(e) => setBulkTopUpAmount(e.target.value)}
+                          required
+                          className={`w-32 px-3 py-1.5 rounded-xl text-xs font-mono font-bold ${glassInput}`}
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs"
+                        >
+                          Confirm All {houseMembers.length}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowBulkTopUp(false)}
+                          className={`p-1 ${textMuted}`}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {canEditHouseInRoomMode && showDepositLedger && (
+                    <div className={`${glassSubCard} rounded-2xl p-4 mb-4 space-y-2.5`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold uppercase tracking-wider text-cyan-500">
+                          Editable Deposit History ({houseDeposits.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowDepositLedger(false)}
+                          className={`text-xs ${textMuted}`}
+                        >
+                          Hide
+                        </button>
+                      </div>
+                      {houseDeposits.length === 0 ? (
+                        <p className={`text-xs ${textMuted}`}>
+                          No deposits logged yet. Use + Top Up or Bulk Top-Up to record deposits.
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                          {houseDeposits.map((dep) => (
+                            <div
+                              key={dep.id}
+                              className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl border border-white/10 text-xs"
+                            >
+                              {editingDepositId === dep.id ? (
+                                <div className="flex flex-wrap items-center gap-2 w-full">
+                                  <span className={`font-bold ${textPrimary}`}>{dep.memberName}</span>
+                                  <input
+                                    type="date"
+                                    value={editDepositDate}
+                                    onChange={(e) => setEditDepositDate(e.target.value)}
+                                    className={`px-2 py-1 rounded-lg text-xs ${glassInput}`}
+                                  />
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={editDepositAmount}
+                                    onChange={(e) => setEditDepositAmount(e.target.value)}
+                                    className={`w-28 px-2 py-1 rounded-lg text-xs font-mono font-bold ${glassInput}`}
+                                  />
+                                  <div className="ml-auto flex gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => saveEditDeposit(dep)}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-semibold"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingDepositId(null)}
+                                      className={`px-2 py-1 ${textMuted}`}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`font-mono ${textMuted}`}>
+                                      {formatDateDisplay(dep.date)}
+                                    </span>
+                                    <span className={`font-semibold ${textPrimary}`}>
+                                      {dep.memberName}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-emerald-500">
+                                      +{formatPKR(dep.amount)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditDeposit(dep)}
+                                      className={`p-1 rounded-lg ${textMuted} hover:text-amber-500`}
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteDepositRecord(dep)}
+                                      className={`p-1 rounded-lg ${textMuted} hover:text-rose-500`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                     {houseMembers.map((member) => {
                       const isEditing = editingMemberId === member.id && canEditHouseInRoomMode;
                       const isToppingUp = topUpMemberId === member.id && canEditHouseInRoomMode;
-                      const isNegative = Number(member.balance) < 0;
+                      const balNum = Number(member.balance || 0);
+                      const isNegative = balNum < 0;
+                      const isLowBalance = balNum >= 0 && balNum < 200;
+                      const agg = houseStats.memberAgg[member.id] || {
+                        mealDeducted: 0,
+                        groceryDeducted: 0,
+                        mealsAttended: 0,
+                      };
+                      const depositedEst = balNum + agg.mealDeducted + agg.groceryDeducted;
 
                       return (
                         <div
                           key={member.id}
-                          className={`${glassSubCard} rounded-2xl p-4 flex flex-col justify-between gap-3`}
+                          className={`${glassSubCard} rounded-2xl p-4 flex flex-col justify-between gap-3 ${
+                            isNegative
+                              ? 'border-rose-400/40'
+                              : isLowBalance
+                              ? 'border-amber-400/40'
+                              : ''
+                          }`}
                         >
                           {isEditing ? (
                             <div className="space-y-2.5">
@@ -3821,42 +4546,100 @@ ${item.details}`
                                 placeholder="Balance"
                                 className={`w-full px-2.5 py-1.5 rounded-lg text-xs font-semibold ${glassInput}`}
                               />
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  onClick={() => saveMemberEdit(member.id)}
-                                  className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => setEditingMemberId(null)}
-                                  className={`px-2 py-1 rounded-lg text-xs ${textMuted}`}
-                                >
-                                  Cancel
-                                </button>
+                              <div className="flex items-center justify-between gap-1.5">
+                                {houseMembers.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveHouseMember(member.id)}
+                                    className="px-2 py-1 rounded-lg bg-rose-500/15 text-rose-500 text-xs font-semibold"
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+                                <div className="flex items-center gap-1.5 ml-auto">
+                                  <button
+                                    onClick={() => saveMemberEdit(member.id)}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-xs font-semibold"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingMemberId(null)}
+                                    className={`px-2 py-1 rounded-lg text-xs ${textMuted}`}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ) : (
                             <>
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <h3 className={`font-bold text-sm ${textPrimary}`}>{member.name}</h3>
+                              <div>
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <h3
+                                      onClick={() => canEditHouseInRoomMode && startEditMember(member)}
+                                      className={`font-bold text-sm truncate ${textPrimary} ${
+                                        canEditHouseInRoomMode ? 'cursor-pointer hover:text-emerald-500' : ''
+                                      }`}
+                                    >
+                                      {member.name}
+                                    </h3>
+                                    {(isNegative || isLowBalance) && (
+                                      <span
+                                        className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                          isNegative
+                                            ? 'bg-rose-500/20 text-rose-500 border border-rose-400/30'
+                                            : 'bg-amber-500/20 text-amber-500 border border-amber-400/30'
+                                        }`}
+                                      >
+                                        {isNegative ? 'Deficit' : 'Low Bal'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {canEditHouseInRoomMode && (
+                                    <button
+                                      onClick={() => startEditMember(member)}
+                                      className={`p-1.5 rounded-lg ${textMuted} hover:text-amber-500`}
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="space-y-1 text-xs mb-3">
+                                  <div className="flex justify-between">
+                                    <span className={textMuted}>Deposited:</span>
+                                    <span className={`font-mono font-medium ${textSecondary}`}>
+                                      {formatPKR(depositedEst)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className={textMuted}>Meals ({agg.mealsAttended}):</span>
+                                    <span className={`font-mono ${textMuted}`}>
+                                      -{formatPKR(agg.mealDeducted)}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className={textMuted}>Groceries:</span>
+                                    <span className={`font-mono ${textMuted}`}>
+                                      -{formatPKR(agg.groceryDeducted)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="pt-2 border-t border-white/10">
+                                  <span className={`block text-[10px] uppercase font-semibold ${textMuted}`}>
+                                    Remaining
+                                  </span>
                                   <p
-                                    className={`text-lg font-extrabold mt-0.5 ${
-                                      isNegative ? 'text-rose-500' : 'text-emerald-500'
+                                    className={`text-lg font-extrabold font-mono mt-0.5 ${
+                                      isNegative ? 'text-rose-500' : isLowBalance ? 'text-amber-500' : 'text-emerald-500'
                                     }`}
                                   >
-                                    {formatMoney(member.balance)}
+                                    {formatPKR(balNum)}
                                   </p>
                                 </div>
-                                {canEditHouseInRoomMode && (
-                                  <button
-                                    onClick={() => startEditMember(member)}
-                                    className={`p-1.5 rounded-lg ${textMuted} hover:text-amber-500`}
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
                               </div>
 
                               {canEditHouseInRoomMode && (
@@ -3892,7 +4675,7 @@ ${item.details}`
                                       }}
                                       className="w-full py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/25 text-emerald-500 text-xs font-semibold flex items-center justify-center gap-1"
                                     >
-                                      <PlusCircle className="w-3.5 h-3.5" /> Top Up Account
+                                      <PlusCircle className="w-3.5 h-3.5" /> + Top Up
                                     </button>
                                   )}
                                 </>
@@ -3910,7 +4693,7 @@ ${item.details}`
                     <div className="flex items-center justify-between mb-4">
                       <h2 className={`font-semibold text-base sm:text-lg flex items-center gap-2 ${textPrimary}`}>
                         <Utensils className="w-5 h-5 text-amber-500" />
-                        {editingHouseExpId ? 'Edit Daily House Expense' : 'Add Daily House Expense'}
+                        {editingHouseExpId ? 'Edit Daily House Expense' : 'Log Daily House Expense'}
                       </h2>
                       {editingHouseExpId && (
                         <button
@@ -3964,7 +4747,7 @@ ${item.details}`
                                   : `${glassSubCard} ${textSecondary}`
                               }`}
                             >
-                              <ShoppingCart className="w-3.5 h-3.5" /> Groceries (All 8)
+                              <ShoppingCart className="w-3.5 h-3.5" /> Groceries (All {houseMembers.length})
                             </button>
                           </div>
                         </div>
@@ -3977,59 +4760,182 @@ ${item.details}`
                             type="number"
                             step="any"
                             placeholder="0.00"
-                            value={houseExpAmount}
+                            value={housePreview.hasRowAmounts ? String(housePreview.billTotal) : houseExpAmount}
                             onChange={(e) => setHouseExpAmount(e.target.value)}
-                            required
-                            className={`w-full px-3.5 py-2.5 rounded-xl text-sm font-semibold ${glassInput}`}
+                            readOnly={housePreview.hasRowAmounts}
+                            required={!housePreview.hasRowAmounts}
+                            className={`w-full px-3.5 py-2.5 rounded-xl text-sm font-mono font-semibold ${glassInput}`}
                           />
                         </div>
                       </div>
 
                       {houseExpCategory === 'Meal' && (
-                        <div className={`${glassSubCard} rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3`}>
-                          <span className={`text-xs font-medium ${textSecondary}`}>
-                            Meal Type (Dinner default):
-                          </span>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {MEAL_OPTIONS.map((meal) => {
-                              const selected = houseExpMeals.includes(meal);
-                              return (
-                                <button
-                                  type="button"
-                                  key={meal}
-                                  onClick={() => toggleHouseMeal(meal)}
-                                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                                    selected
-                                      ? 'bg-amber-400 text-slate-950 border-amber-300'
-                                      : `${glassSubCard} ${textSecondary}`
-                                  }`}
-                                >
-                                  {selected ? '✓ ' : ''}
-                                  {meal}
-                                </button>
-                              );
-                            })}
+                        <div className={`${glassSubCard} rounded-2xl p-3.5 space-y-2.5`}>
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs font-medium ${textSecondary}`}>
+                              Meal Type ({isMultiMealMode ? 'Multi-Meal Active' : 'Dinner Default'}):
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsMultiMealMode((prev) => !prev)}
+                              className="text-[11px] font-bold text-amber-500 hover:underline"
+                            >
+                              {isMultiMealMode ? 'Use Dinner Default' : 'Toggle Multi-Meal'}
+                            </button>
                           </div>
+                          {isMultiMealMode && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {MEAL_OPTIONS.map((meal) => {
+                                const selected = houseExpMeals.includes(meal);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={meal}
+                                    onClick={() => toggleHouseMeal(meal)}
+                                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                                      selected
+                                        ? 'bg-amber-400 text-slate-950 border-amber-300'
+                                        : `${glassSubCard} ${textSecondary}`
+                                    }`}
+                                  >
+                                    {selected ? '✓ ' : ''}
+                                    {meal}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       )}
+
+                      <div className={`${glassSubCard} rounded-2xl p-4 space-y-3`}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className={`text-xs font-semibold ${textPrimary}`}>
+                            Purchased Items & Categories (Editable)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={addHouseItemRow}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-emerald-500 hover:underline"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Add Row
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {messCategories.map((cat) => (
+                            <span
+                              key={cat}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] border ${
+                                isDark
+                                  ? 'bg-slate-950/60 border-white/10 text-slate-300'
+                                  : 'bg-white border-slate-300 text-slate-700'
+                              }`}
+                            >
+                              {cat}
+                              {messCategories.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMessCategory(cat)}
+                                  className="text-rose-500 hover:text-rose-400"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          <div className="inline-flex items-center gap-1">
+                            <input
+                              type="text"
+                              placeholder="+ Category"
+                              value={newMessCategoryInput}
+                              onChange={(e) => setNewMessCategoryInput(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleAddMessCategory(e)}
+                              className={`w-24 px-2 py-0.5 rounded-lg text-[11px] ${glassInput}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddMessCategory}
+                              className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-500 text-[11px] font-bold"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          {houseExpItems.map((row) => (
+                            <div
+                              key={row.id}
+                              className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center"
+                            >
+                              <div className="flex rounded-xl overflow-hidden border border-white/10 shrink-0">
+                                {['Meal', 'Grocery'].map((st) => (
+                                  <button
+                                    type="button"
+                                    key={st}
+                                    onClick={() => updateHouseItemRow(row.id, 'splitType', st)}
+                                    className={`px-2.5 py-1.5 text-[11px] font-bold ${
+                                      row.splitType === st
+                                        ? st === 'Meal'
+                                          ? 'bg-amber-400 text-slate-950'
+                                          : 'bg-cyan-400 text-slate-950'
+                                        : `${glassSubCard} ${textMuted}`
+                                    }`}
+                                  >
+                                    {st}
+                                  </button>
+                                ))}
+                              </div>
+                              <select
+                                value={row.category}
+                                onChange={(e) => updateHouseItemRow(row.id, 'category', e.target.value)}
+                                className={`px-2.5 py-1.5 rounded-xl text-xs ${glassInput}`}
+                              >
+                                {messCategories.map((c) => (
+                                  <option key={c} value={c} className={isDark ? 'bg-slate-900' : 'bg-white'}>
+                                    {c}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                type="text"
+                                placeholder="Item note (e.g., Chicken, Roti)"
+                                value={row.name}
+                                onChange={(e) => updateHouseItemRow(row.id, 'name', e.target.value)}
+                                className={`flex-1 px-3 py-1.5 rounded-xl text-xs ${glassInput}`}
+                              />
+                              <input
+                                type="number"
+                                step="any"
+                                placeholder="Amount"
+                                value={row.amount}
+                                onChange={(e) => updateHouseItemRow(row.id, 'amount', e.target.value)}
+                                className={`w-28 px-3 py-1.5 rounded-xl text-xs font-mono font-bold ${glassInput}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeHouseItemRow(row.id)}
+                                className={`p-1.5 rounded-lg ${textMuted} hover:text-rose-500 self-end sm:self-center`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
 
                       <div className={`${glassSubCard} rounded-2xl p-4`}>
                         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                           <div>
                             <span className={`text-xs font-semibold block ${textPrimary}`}>
                               {houseExpCategory === 'Meal'
-                                ? `Toggle Present Members (${presentMemberIds.length} of 8 Present — Cost divides ONLY on Present)`
-                                : 'Groceries Split Rule: Automatically divided equally across ALL 8 members'}
+                                ? `Attendance (${presentMemberIds.length}/${houseMembers.length} Present — Meal divides ONLY on Present; Grocery splits on All ${houseMembers.length})`
+                                : `Groceries Split Rule: Automatically divided equally across ALL ${houseMembers.length} members`}
                             </span>
-                            {Number(houseExpAmount) > 0 && (
-                              <span className="text-[11px] text-emerald-500 font-medium">
-                                Per Person Deduction:{' '}
-                                {formatMoney(
-                                  Number(houseExpAmount) /
-                                    (houseExpCategory === 'Groceries'
-                                      ? 8
-                                      : Math.max(presentMemberIds.length, 1))
-                                )}
+                            {housePreview.billTotal > 0 && (
+                              <span className="text-[11px] font-mono text-emerald-500 font-medium">
+                                Present pay: {formatPKR(housePreview.perPresentMeal + housePreview.perMemberGrocery)} | Absent pay: {formatPKR(housePreview.perMemberGrocery)}
                               </span>
                             )}
                           </div>
@@ -4085,7 +4991,7 @@ ${item.details}`
                       <div className="flex flex-col sm:flex-row gap-3">
                         <input
                           type="text"
-                          placeholder="Expense note (e.g., Chicken Dinner, Weekly Vegetables & Flour...)"
+                          placeholder="Overall bill note (e.g., Chicken Dinner, Weekly Vegetables & Flour...)"
                           value={houseExpDetail}
                           onChange={(e) => setHouseExpDetail(e.target.value)}
                           className={`flex-1 px-3.5 py-2.5 rounded-xl text-sm ${glassInput}`}
@@ -4095,7 +5001,7 @@ ${item.details}`
                           className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-semibold text-sm shrink-0"
                         >
                           <Check className="w-4 h-4" />
-                          {editingHouseExpId ? 'Update House Bill' : 'Split & Deduct'}
+                          {editingHouseExpId ? 'Update House Bill' : 'Save Record'}
                         </button>
                       </div>
                     </form>
@@ -4109,7 +5015,7 @@ ${item.details}`
                     }`}
                   >
                     <h3 className={`font-semibold text-sm ${textPrimary}`}>
-                      Shared House Expense History ({houseExpenses.length})
+                      Expense Ledger ({houseExpenses.length})
                     </h3>
                   </div>
                   {houseExpenses.length === 0 ? (
@@ -4135,31 +5041,46 @@ ${item.details}`
                                     : 'bg-amber-500/15 border-amber-400/25 text-amber-500'
                                 }`}
                               >
-                                {exp.category}
-                                {exp.meals && exp.meals.length > 0 ? ` (${exp.meals.join(', ')})` : ''}
+                                {exp.mealType || exp.category}
                               </span>
                               <span className={`text-sm font-semibold ${textPrimary}`}>{exp.detail}</span>
                             </div>
                             <p className={`text-xs ${textMuted}`}>
-                              {exp.splitMode} ({exp.participantIds?.length || 8} members) •{' '}
-                              <strong className={textSecondary}>{formatMoney(exp.perHead)}</strong> /
-                              member
+                              {exp.splitMode} ({exp.participantIds?.length || houseMembers.length} members) •{' '}
+                              <strong className={`font-mono ${textSecondary}`}>
+                                {formatPKR(exp.perHead)}
+                              </strong>{' '}
+                              / member
                             </p>
                           </div>
 
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm font-bold text-rose-500">
-                              -{formatMoney(exp.amount)}
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-sm font-bold font-mono text-rose-500">
+                              -{formatPKR(exp.amount)}
                             </span>
                             {canEditHouseInRoomMode && (
                               <>
                                 <button
+                                  type="button"
+                                  onClick={() => copyHouseBillWhatsApp(exp)}
+                                  title="Copy WhatsApp Summary"
+                                  className={`p-1.5 rounded-lg ${textMuted} hover:text-emerald-500`}
+                                >
+                                  {copiedId === `wa-${exp.id}` ? (
+                                    <ClipboardCheck className="w-3.5 h-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Share2 className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => startEditHouseExpense(exp)}
                                   className={`p-1.5 rounded-lg ${textMuted} hover:text-amber-500`}
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
+                                  type="button"
                                   onClick={() => deleteHouseExpense(exp)}
                                   className={`p-1.5 rounded-lg ${textMuted} hover:text-rose-500`}
                                 >
@@ -4332,7 +5253,7 @@ ${item.details}`
                 <div className="flex items-center gap-2.5">
                   <Key className="w-5 h-5 text-amber-500" />
                   <h2 className={`font-bold text-lg ${textPrimary}`}>
-                    Roommate Mess Key Access (8-Friends Mess Read-Only)
+                    Roommate Mess Key Access ({getTabLabel('house')} Read-Only)
                   </h2>
                 </div>
                 <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-500">
@@ -4340,7 +5261,7 @@ ${item.details}`
                 </span>
               </div>
               <p className={`text-xs mb-4 ${textMuted}`}>
-                Any visitor who is not signed in with your Sole Admin account sees <strong>ONLY the 8-Friends Mess tab</strong> in read-only mode. Share your website link and this <strong>Mess Key</strong>—no other tabs or Firebase settings are visible.
+                Any visitor who is not signed in with your Sole Admin account sees <strong>ONLY the {getTabLabel('house')} tab</strong> in read-only mode. Share your website link and this <strong>Mess Key</strong>—no other tabs or Firebase settings are visible.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4374,7 +5295,7 @@ ${item.details}`
                     </button>
                   </div>
                   <p className={`text-[11px] pt-1 ${textMuted}`}>
-                    Roommates &amp; approved users get default <strong>Read-Only</strong> status for 8-Friends Mess.
+                    Roommates &amp; approved users get default <strong>Read-Only</strong> status for {getTabLabel('house')}.
                   </p>
                 </div>
 
@@ -4384,7 +5305,7 @@ ${item.details}`
                       Shareable Website Mess Link
                     </span>
                     <p className={`text-xs leading-relaxed ${textSecondary}`}>
-                      Send this link to roommates. They open it, enter your <strong>Mess Key</strong>, and view only your <strong>8-Friends Mess</strong> status.
+                      Send this link to roommates. They open it, enter your <strong>Mess Key</strong>, and view only your <strong>{getTabLabel('house')}</strong> status.
                     </p>
                   </div>
                   <button
@@ -4470,17 +5391,17 @@ ${item.details}`
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div>
                   <h2 className={`font-bold text-base sm:text-lg ${textPrimary}`}>
-                    Arrange Navigation Tabs
+                    Arrange &amp; Rename Navigation Tabs
                   </h2>
                   <p className={`text-xs mt-0.5 ${textMuted}`}>
-                    Use the arrows below (or drag tabs directly in the top bar) to customize your tab sequence.
+                    Click the pencil icon to rename any tab, or use arrows / drag tabs to customize sequence.
                   </p>
                 </div>
                 <button
                   onClick={resetTabOrder}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl ${glassSubCard} text-xs font-medium ${textSecondary} hover:text-emerald-500`}
                 >
-                  <RotateCcw className="w-3.5 h-3.5" /> Reset Default Order
+                  <RotateCcw className="w-3.5 h-3.5" /> Reset Default Order &amp; Names
                 </button>
               </div>
 
@@ -4489,36 +5410,77 @@ ${item.details}`
                   const tab = TAB_CATALOG[tabId];
                   if (!tab) return null;
                   const Icon = tab.icon;
+                  const isEditingThisTab = editingTabId === tab.id;
                   return (
                     <div
                       key={tab.id}
                       className={`${glassSubCard} rounded-2xl px-3.5 py-2.5 flex items-center justify-between gap-2`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`text-xs font-mono font-bold ${textMuted}`}>
-                          {index + 1}.
-                        </span>
-                        <Icon className="w-4 h-4 text-emerald-500 shrink-0" />
-                        <span className={`text-xs font-semibold truncate ${textPrimary}`}>
-                          {tab.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => moveTabByIndex(index, index - 1)}
-                          disabled={index === 0}
-                          className={`p-1 rounded-lg ${glassSubCard} disabled:opacity-30 ${textPrimary}`}
-                        >
-                          <ChevronLeft className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => moveTabByIndex(index, index + 1)}
-                          disabled={index === tabOrder.length - 1}
-                          className={`p-1 rounded-lg ${glassSubCard} disabled:opacity-30 ${textPrimary}`}
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {isEditingThisTab ? (
+                        <div className="flex items-center gap-1.5 w-full">
+                          <input
+                            type="text"
+                            value={tempTabLabel}
+                            onChange={(e) => setTempTabLabel(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && saveTabLabel(tab.id)}
+                            className={`flex-1 px-2 py-1 rounded-lg text-xs font-semibold ${glassInput}`}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => saveTabLabel(tab.id)}
+                            className="p-1 rounded-lg bg-emerald-500 text-slate-950"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingTabId(null)}
+                            className={`p-1 ${textMuted}`}
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`text-xs font-mono font-bold ${textMuted}`}>
+                              {index + 1}.
+                            </span>
+                            <Icon className="w-4 h-4 text-emerald-500 shrink-0" />
+                            <span className={`text-xs font-semibold truncate ${textPrimary}`}>
+                              {getTabLabel(tab.id)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTabId(tab.id);
+                                setTempTabLabel(getTabLabel(tab.id));
+                              }}
+                              title="Rename Tab"
+                              className={`p-1 rounded-lg ${glassSubCard} ${textMuted} hover:text-amber-500`}
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => moveTabByIndex(index, index - 1)}
+                              disabled={index === 0}
+                              className={`p-1 rounded-lg ${glassSubCard} disabled:opacity-30 ${textPrimary}`}
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => moveTabByIndex(index, index + 1)}
+                              disabled={index === tabOrder.length - 1}
+                              className={`p-1 rounded-lg ${glassSubCard} disabled:opacity-30 ${textPrimary}`}
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}

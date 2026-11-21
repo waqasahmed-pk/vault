@@ -55,15 +55,15 @@ const ROOMMATE_SESSION_KEY = 'wa_roommate_active_key_v1';
 // Sole Admin Account Email (only this account can ever be Admin)
 const SOLE_ADMIN_EMAIL = 'waqasahmed5478437@gmail.com';
 
-// Built-in Firebase project configuration (hidden from UI & users)
+// Firebase project configuration injected via Vite env / GitHub Secrets
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCSuWKftn-stgW1oDcUyERf98sExy4p9gw",
-  authDomain: "wa-desk-6634c.firebaseapp.com",
-  projectId: "wa-desk-6634c",
-  storageBucket: "wa-desk-6634c.firebasestorage.app",
-  messagingSenderId: "853778625093",
-  appId: "1:853778625093:web:e17f2ddca87122201ce92c",
-  measurementId: "G-VV7V8MZ4ZH",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'wa-desk-6634c.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'wa-desk-6634c',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'wa-desk-6634c.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || '',
 };
 
 const DEFAULT_TAB_ORDER = [
@@ -1861,7 +1861,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `wa-workspace-backup-${getTodayStr()}.json`;
+    link.download = `wa-vault-backup-${getTodayStr()}.json`;
     link.click();
     URL.revokeObjectURL(url);
     showToast('Backup file downloaded!');
@@ -2780,7 +2780,11 @@ export default function App() {
                             onClick={() =>
                               copyTextValue(
                                 item.id,
-                                `${item.title}\nSummary: ${item.summary}\n\nDetails:\n${item.details}`
+                                `${item.title}
+Summary: ${item.summary}
+
+Details:
+${item.details}`
                               )
                             }
                             title="Copy All"
@@ -4203,7 +4207,7 @@ export default function App() {
                       </span>
                     </div>
                     <p className={`text-xs leading-relaxed ${textSecondary}`}>
-                      Configuration credentials are stored privately and never displayed to visitors or users.
+                      Configuration credentials are injected via build secrets and never displayed to visitors or users.
                     </p>
                   </div>
 
